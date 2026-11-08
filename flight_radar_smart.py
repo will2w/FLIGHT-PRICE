@@ -28,16 +28,24 @@ from playwright.sync_api import sync_playwright
 DB_FILE = "flight_smart_monitor.db"
 
 # ==================== 🧠 聰明矩陣設定區 ====================
+# 1. 出發地清單（杜塞爾多夫及德國周邊樞紐）
 ORIGIN_HUBS = ["DUS", "CGN", "FRA", "AMS"]
+
+# 2. 目的地清單（香港與中國主要樞紐）
 DESTINATION_HUBS = ["HKG", "CAN", "SZX", "PVG", "PEK"]
+
+# 3. 預算上限與目標出發日期
 GLOBAL_TARGET_PRICE = 800
 TARGET_DATE = "2026-12-15"
 # ========================================================
 
 
 def init_db():
+  """初始化 SQLite 資料庫，建立狀態表與歷史日誌表"""
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
+
+  # 1. 矩陣狀態表（記錄歷史最低價與更新時間）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS flight_matrix_history (
             route_key TEXT PRIMARY KEY,
@@ -49,6 +57,8 @@ def init_db():
             updated_time TEXT
         )
     """)
+
+  # 2. 歷史日誌表（專門用來給 Streamlit 繪製折線圖）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS price_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,17 +70,21 @@ def init_db():
             recorded_at TEXT
         )
     """)
+
   conn.commit()
   conn.close()
 
 
 def log_price_to_db(origin, destination, flight_date, price):
+  """每次爬蟲檢查時，無條件寫入一筆歷史價格日誌"""
   if price is None:
     return
+
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
   route_key = f"{origin}-{destination}-{flight_date}"
   recorded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
   cursor.execute(
       """
         INSERT INTO price_logs (route_key, origin, destination, flight_date, price, recorded_at)
@@ -78,12 +92,14 @@ def log_price_to_db(origin, destination, flight_date, price):
     """,
       (route_key, origin, destination, flight_date, price, recorded_at),
   )
+
   conn.commit()
   conn.close()
   print(f"📝 [日誌] 已記錄: {origin} ➔ {destination} = {price} €")
 
 
 def update_matrix_status(origin, destination, flight_date, current_price):
+  """更新矩陣最低價狀態表"""
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
   route_key = f"{origin}-{destination}-{flight_date}"
@@ -121,12 +137,13 @@ def update_matrix_status(origin, destination, flight_date, current_price):
             """,
           (current_price, now_str, route_key),
       )
+
   conn.commit()
   conn.close()
 
 
 def get_google_flight_price(origin, destination, date):
-  """利用 Playwright 掃描 Google Flights 矩陣價格"""
+  """升級版：使用雙策略（DOM 精準尋找 + 頁面廣域正則）穩定抓取 Google Flights 價格"""
   with sync_playwright() as p:
     browser = p.chromium.launch(
         headless=True,
@@ -142,38 +159,57 @@ def get_google_flight_price(origin, destination, date):
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         ),
-        locale="de-DE",
+        locale="de-DE",  # 歐洲地區德語系格式
     )
     page = context.new_page()
     url = f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{date}"
 
     try:
       page.goto(url, timeout=40000)
-      page.wait_for_timeout(6000)
+      page.wait_for_timeout(8000)  # 給予足夠時間讓 JavaScript 渲染價格矩陣
 
-      price_locators = page.locator("div, span").filter(
-          has_text=re.compile(r"€|EUR|TWD|NT\$|\$")
-      )
       prices = []
-      count = price_locators.count()
-      for i in range(min(count, 30)):
-        text = price_locators.nth(i).inner_text().strip()
-        match = re.search(r"(?:€|EUR|TWD|NT\$|\$)\s*([\d,.]+)", text)
-        if match:
-          clean_str = match.group(1).replace(",", "").replace(".", "")
-          try:
-            val = int(clean_str)
-            if 100 <= val <= 10000:
-              prices.append(val)
-          except:
-            continue
+
+      # 策略 A：尋找網頁中包含歐元或貨幣符號的元素
+      elements = page.locator('div[role="region"], div[jscontroller], span').all()
+      for el in elements:
+        try:
+          text = el.inner_text().strip()
+          if len(text) < 30 and ("€" in text or "EUR" in text):
+            match = re.search(r"([\d.,]+)\s*(?:€|EUR)", text)
+            if match:
+              raw_num = match.group(1)
+              clean_num = raw_num.replace(".", "").replace(",", "")
+              val = int(clean_num)
+              if 150 <= val <= 8000:
+                prices.append(val)
+        except:
+          continue
+
+      # 策略 B：若策略 A 未命中，全面退回廣域正則掃描頁面內文
+      if not prices:
+        body_text = page.inner_text("body")
+        all_matches = re.findall(
+            r"(?:€|EUR)\s*([\d.,]+)|([\d.,]+)\s*(?:€|EUR)", body_text
+        )
+        for m in all_matches:
+          num_str = m[0] if m[0] else m[1]
+          if num_str:
+            clean_num = num_str.replace(".", "").replace(",", "")
+            try:
+              val = int(clean_num)
+              if 150 <= val <= 8000:
+                prices.append(val)
+            except:
+              continue
 
       browser.close()
       if prices:
         return min(prices)
       return None
+
     except Exception as e:
-      print(f"爬取 {origin} -> {destination} 失敗: {e}")
+      print(f"❌ 爬取 {origin} -> {destination} 失敗: {e}")
       browser.close()
       return None
 
@@ -196,7 +232,7 @@ if __name__ == "__main__":
       f"🚀 開始執行多執行緒矩陣掃描：總計 {len(tasks)} 條航線同步發動中..."
   )
 
-  # 使用最多 3 個執行緒平行抓取（避免伺服器過載或記憶體爆量）
+  # 使用最多 3 個執行緒平行抓取
   with ThreadPoolExecutor(max_workers=3) as executor:
     futures = [executor.submit(scan_single_route, task) for task in tasks]
     for future in as_completed(futures):
