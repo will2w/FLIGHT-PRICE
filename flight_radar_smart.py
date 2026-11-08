@@ -2,6 +2,29 @@ from datetime import datetime
 import os
 import re
 import sqlite3
+import subprocess
+import sys
+
+# 🛡️ 關鍵修復：強制統一 Playwright 瀏覽器快取路徑至當前使用者家目錄，徹底解決雲端權限與路徑衝突
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.expanduser(
+    "~/.cache/ms-playwright"
+)
+
+# 🛡️ 自動防護：若雲端環境缺少 Chromium 核心，自動在背景執行安裝
+try:
+  from playwright.sync_api import sync_playwright
+
+  with sync_playwright() as p:
+    pass
+except Exception:
+  print("⚠️ 偵測到雲端環境缺少 Playwright 瀏覽器核心，正在自動安裝...")
+  try:
+    subprocess.check_call(
+        [sys.executable, "-m", "playwright", "install", "chromium"]
+    )
+  except Exception as e:
+    print(f"瀏覽器自動安裝失敗: {e}")
+
 from playwright.sync_api import sync_playwright
 
 DB_FILE = "flight_smart_monitor.db"
