@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import os
 import re
@@ -5,7 +6,7 @@ import sqlite3
 import subprocess
 import sys
 
-# 🛡️ 強制將 Playwright 路徑指向統一且可寫入的家目錄，徹底解決雲端權限衝突
+# 🛡️ 強制將 Playwright 路徑指向統一且可寫入的家目錄
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.expanduser(
     "~/.cache/ms-playwright"
 )
@@ -27,24 +28,16 @@ from playwright.sync_api import sync_playwright
 DB_FILE = "flight_smart_monitor.db"
 
 # ==================== 🧠 聰明矩陣設定區 ====================
-# 1. 出發地清單（杜塞爾多夫及德國周邊樞紐）
 ORIGIN_HUBS = ["DUS", "CGN", "FRA", "AMS"]
-
-# 2. 目的地清單（香港與中國主要樞紐）
 DESTINATION_HUBS = ["HKG", "CAN", "SZX", "PVG", "PEK"]
-
-# 3. 預算上限與目標出發日期
 GLOBAL_TARGET_PRICE = 800
 TARGET_DATE = "2026-12-15"
 # ========================================================
 
 
 def init_db():
-  """初始化 SQLite 資料庫，建立狀態表與歷史日誌表"""
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
-
-  # 1. 矩陣狀態表（記錄歷史最低價與更新時間）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS flight_matrix_history (
             route_key TEXT PRIMARY KEY,
@@ -56,8 +49,6 @@ def init_db():
             updated_time TEXT
         )
     """)
-
-  # 2. 歷史日誌表（專門用來給 Streamlit 繪製折線圖）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS price_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,21 +60,17 @@ def init_db():
             recorded_at TEXT
         )
     """)
-
   conn.commit()
   conn.close()
 
 
 def log_price_to_db(origin, destination, flight_date, price):
-  """每次爬蟲檢查時，無條件寫入一筆歷史價格日誌"""
   if price is None:
     return
-
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
   route_key = f"{origin}-{destination}-{flight_date}"
   recorded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
   cursor.execute(
       """
         INSERT INTO price_logs (route_key, origin, destination, flight_date, price, recorded_at)
@@ -91,14 +78,12 @@ def log_price_to_db(origin, destination, flight_date, price):
     """,
       (route_key, origin, destination, flight_date, price, recorded_at),
   )
-
   conn.commit()
   conn.close()
-  print(f" 📝 [日誌] 已記錄: {origin} ➔ {destination} = {price} €")
+  print(f"📝 [日誌] 已記錄: {origin} ➔ {destination} = {price} €")
 
 
 def update_matrix_status(origin, destination, flight_date, current_price):
-  """更新矩陣最低價狀態表"""
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
   route_key = f"{origin}-{destination}-{flight_date}"
@@ -136,13 +121,12 @@ def update_matrix_status(origin, destination, flight_date, current_price):
             """,
           (current_price, now_str, route_key),
       )
-
   conn.commit()
   conn.close()
 
 
 def get_google_flight_price(origin, destination, date):
-  """利用 Playwright 掃描 Google Flights 矩陣價格（含雲端 Linux 相容參數）"""
+  """利用 Playwright 掃描 Google Flights 矩陣價格"""
   with sync_playwright() as p:
     browser = p.chromium.launch(
         headless=True,
@@ -194,22 +178,31 @@ def get_google_flight_price(origin, destination, date):
       return None
 
 
+def scan_single_route(args):
+  origin, destination, target_date = args
+  print(f"正在平行掃描航線: {origin} ➔ {destination} ({target_date})")
+  price = get_google_flight_price(origin, destination, target_date)
+  return origin, destination, target_date, price
+
+
 if __name__ == "__main__":
   init_db()
+  tasks = [
+      (origin, dest, TARGET_DATE)
+      for origin in ORIGIN_HUBS
+      for dest in DESTINATION_HUBS
+  ]
   print(
-      f"🚀 開始執行矩陣掃描：{len(ORIGIN_HUBS)} 個出發地 x"
-      f" {len(DESTINATION_HUBS)} 個目的地"
+      f"🚀 開始執行多執行緒矩陣掃描：總計 {len(tasks)} 條航線同步發動中..."
   )
 
-  for origin in ORIGIN_HUBS:
-    for destination in DESTINATION_HUBS:
-      print(f"\n正在掃描航線: {origin} ➔ {destination} ({TARGET_DATE})")
-      current_price = get_google_flight_price(
-          origin, destination, TARGET_DATE
-      )
-
+  # 使用最多 3 個執行緒平行抓取（避免伺服器過載或記憶體爆量）
+  with ThreadPoolExecutor(max_workers=3) as executor:
+    futures = [executor.submit(scan_single_route, task) for task in tasks]
+    for future in as_completed(futures):
+      origin, destination, flight_date, current_price = future.result()
       if current_price:
-        log_price_to_db(origin, destination, TARGET_DATE, current_price)
-        update_matrix_status(origin, destination, TARGET_DATE, current_price)
+        log_price_to_db(origin, destination, flight_date, current_price)
+        update_matrix_status(origin, destination, flight_date, current_price)
       else:
-        print(f" ⚠️ 無法取得 {origin} ➔ {destination} 價格。")
+        print(f"⚠️ 無法取得 {origin} ➔ {destination} 價格。")
