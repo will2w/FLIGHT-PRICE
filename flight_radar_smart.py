@@ -2,7 +2,24 @@ from datetime import datetime
 import os
 import re
 import sqlite3
-from playwright.sync_api import sync_playwright
+import subprocess
+import sys
+
+# 🛡️ 自動防護：確保雲端/本機環境絕對有安裝 playwright 與瀏覽器核心
+try:
+  from playwright.sync_api import sync_playwright
+except ImportError:
+  print("⚠️ 偵測到環境缺少 playwright，正在自動安裝...")
+  subprocess.check_call(
+      [sys.executable, "-m", "pip", "install", "playwright", "pandas", "requests"]
+  )
+  try:
+    subprocess.check_call(
+        [sys.executable, "-m", "playwright", "install", "chromium"]
+    )
+  except Exception as e:
+    print(f"瀏覽器安裝提示: {e}")
+  from playwright.sync_api import sync_playwright
 
 DB_FILE = "flight_smart_monitor.db"
 
