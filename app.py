@@ -14,13 +14,11 @@ DB_FILE = "flight_smart_monitor.db"
 
 
 def run_scraper_with_live_logs():
-  """執行爬蟲並將標準輸出（Stdout）即時串流到 Streamlit 的文字框中"""
-  log_output = "🚀 開始執行爬蟲與矩陣掃描...\n"
-  log_box = st.empty()  # 建立一個動態容器來刷新文字框
+  log_output = "🚀 開始執行多執行緒平行爬蟲...\n"
+  log_box = st.empty()
   log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
 
   try:
-    # 使用 Popen 即時捕捉執行過程中的每一行輸出
     process = subprocess.Popen(
         [sys.executable, "flight_radar_smart.py"],
         stdout=subprocess.PIPE,
@@ -29,7 +27,6 @@ def run_scraper_with_live_logs():
         bufsize=1,
     )
 
-    # 逐行讀取輸出並即時更新畫面的 text_area
     for line in iter(process.stdout.readline, ""):
       if line:
         log_output += line
@@ -39,14 +36,13 @@ def run_scraper_with_live_logs():
     process.wait()
 
     if process.returncode == 0:
-      log_output += "\n✅ 爬蟲執行完畢，資料庫已更新！"
+      log_output += "\n✅ 矩陣掃描完畢，資料庫已更新！"
       log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
       return True
     else:
-      log_output += f"\n❌ 爬蟲執行結束，返回碼: {process.returncode}"
+      log_output += f"\n❌ 執行結束，返回碼: {process.returncode}"
       log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
       return False
-
   except Exception as e:
     log_output += f"\n❌ 發生例外錯誤: {str(e)}"
     log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
@@ -54,18 +50,14 @@ def run_scraper_with_live_logs():
 
 
 def ensure_db_exists():
-  """🛡️ 自動防護：若無資料庫，自動執行即時日誌爬蟲生成"""
   if not os.path.exists(DB_FILE) or os.path.getsize(DB_FILE) == 0:
-    st.warning(
-        "⚠️ 尚未偵測到有效的資料庫檔案。系統正在背景自動執行第一次爬蟲，請觀看下方即時日誌..."
-    )
+    st.warning("⚠️ 尚未偵測到資料庫。正在自動執行第一次平行掃描...")
     success = run_scraper_with_live_logs()
     if success:
-      st.success("✅ 初始資料庫生成成功！正在載入儀表板...")
+      st.success("✅ 資料庫初始化成功！")
       st.rerun()
 
 
-# 啟動時檢查
 ensure_db_exists()
 
 
@@ -80,7 +72,7 @@ def load_price_logs():
     )
     conn.close()
     return df
-  except Exception:
+  except:
     return pd.DataFrame()
 
 
@@ -93,32 +85,38 @@ def load_matrix_status():
     df = pd.read_sql_query("SELECT * FROM flight_matrix_history", conn)
     conn.close()
     return df
-  except Exception:
+  except:
     return pd.DataFrame()
 
 
 # 側邊欄控制台
 st.sidebar.header("📱 雲端行動控制台")
-if st.sidebar.button("🔄 立即手動抓取最新機票"):
-  with st.spinner("正在執行即時矩陣掃描..."):
+if st.sidebar.button("🔄 立即手動平行抓取最新機票"):
+  with st.spinner("正在以多執行緒掃描矩陣..."):
     success = run_scraper_with_live_logs()
     if success:
-      st.sidebar.success("✅ 抓取成功！")
+      st.sidebar.success("✅ 更新成功！")
       st.cache_data.clear()
       st.rerun()
 
 st.title("✈️ 德國 ➔ 中國/香港 智慧機票矩陣儀表板")
-st.markdown("追蹤多出發樞紐與目的地的即時價格、矩陣最低點與歷史走勢波動。")
+st.markdown("追蹤多出發樞紐與目的地的即時價格、歷史均價與破盤特價警示。")
 
 df_logs = load_price_logs()
 df_status = load_matrix_status()
 
 if df_status.empty:
   st.warning(
-      "⚠️ 目前資料庫仍無數據。請點擊左側側邊欄的 **「🔄 立即手動抓取最新機票」**"
-      " 按鈕來觸發即時掃描！"
+      "⚠️ 目前資料庫仍無數據。請點擊左側側邊欄的 **「🔄 立即手動平行抓取最新機票」**"
+      " 按鈕！"
   )
 else:
+  # 計算歷史平均價格作為基準
+  if not df_logs.empty:
+    avg_price = df_logs["price"].mean()
+  else:
+    avg_price = 800  # 預設基準
+
   st.sidebar.markdown("---")
   st.sidebar.header("🔍 篩選與檢視條件")
   df_status["route_display"] = (
@@ -132,6 +130,15 @@ else:
 
   filtered_status = df_status[df_status["route_display"].isin(selected_routes)]
 
+  # 🚨 檢查是否有低於歷史均價的特價機票
+  cheap_deals = filtered_status[filtered_status["lowest_price"] < avg_price]
+
+  if not cheap_deals.empty:
+    st.error(
+        f"🚨 **發現特價機票情報！** 目前有 {len(cheap_deals)}"
+        f" 條航線價格低於歷史均價 ({int(avg_price)} €)，快把握機會下手！"
+    )
+
   col1, col2, col3 = st.columns(3)
   with col1:
     st.metric(label="監控中的航線組合", value=len(df_status))
@@ -144,7 +151,11 @@ else:
           delta=f"{min_row['origin']} ➔ {min_row['destination']}",
       )
   with col3:
-    st.metric(label="儀表板更新時間", value=datetime.now().strftime("%Y-%m-%d"))
+    st.metric(
+        label="歷史平均基準價",
+        value=f"{int(avg_price)} €",
+        delta="特價分界線",
+    )
 
   st.markdown("---")
 
