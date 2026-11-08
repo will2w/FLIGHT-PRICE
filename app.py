@@ -108,7 +108,7 @@ df_status = load_matrix_status()
 if df_status.empty:
   st.warning(
       "⚠️ 目前資料庫仍無數據。請點擊左側側邊欄的 **「🔄 立即手動平行抓取最新機票」**"
-      " 按鈕！"
+      " 按鈕來觸發即時掃描！"
   )
 else:
   # 計算歷史平均價格作為基準
@@ -193,3 +193,59 @@ else:
       ],
       use_container_width=True,
   )
+
+st.markdown("---")
+
+# ==================== 🛠️ 隱藏版資料庫原始數據除錯區 ====================
+with st.expander(
+    "🛠️ 點擊展開：資料庫原始數據除錯 (Raw SQLite Debugger)", expanded=False
+):
+  st.markdown(
+      "這裡直接讀取 `flight_smart_monitor.db` 的 Raw Data，用來即時檢驗爬蟲是否有成功寫入資料。"
+  )
+
+  if os.path.exists(DB_FILE) and os.path.getsize(DB_FILE) > 0:
+    try:
+      conn = sqlite3.connect(DB_FILE)
+
+      table_choice = st.radio(
+          "選擇要查看的資料表 (Table)",
+          ["flight_matrix_history (矩陣狀態)", "price_logs (歷史日誌)"],
+          horizontal=True,
+      )
+
+      if "flight_matrix_history" in table_choice:
+        debug_df = pd.read_sql_query(
+            "SELECT * FROM flight_matrix_history ORDER BY updated_time DESC",
+            conn,
+        )
+        st.subheader("📊 矩陣狀態表原始內容")
+        st.metric(
+            label="總記錄航線數", value=len(debug_df) if not debug_df.empty else 0
+        )
+        st.dataframe(debug_df, use_container_width=True)
+
+      else:
+        debug_df = pd.read_sql_query(
+            "SELECT * FROM price_logs ORDER BY recorded_at DESC LIMIT 100",
+            conn,
+        )
+        st.subheader("📝 歷史價格日誌表原始內容 (最近 100 筆)")
+        st.metric(
+            label="總記錄筆數", value=len(debug_df) if not debug_df.empty else 0
+        )
+        st.dataframe(debug_df, use_container_width=True)
+
+      with open(DB_FILE, "rb") as f:
+        st.download_button(
+            label="📥 下載完整 SQLite 資料庫檔案 (.db)",
+            data=f,
+            file_name="flight_smart_monitor.db",
+            mime="application/x-sqlite3",
+        )
+
+      conn.close()
+    except Exception as e:
+      st.error(f"讀取資料庫發生錯誤: {e}")
+  else:
+      st.warning("⚠️ 目前尚無資料庫檔案或檔案大小為 0。")
