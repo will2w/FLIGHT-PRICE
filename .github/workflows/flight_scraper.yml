@@ -2,14 +2,14 @@ name: Automated Flight Scraper
 
 on:
   schedule:
-    - cron: '0 8 * * *' # 每天早上 8 點自動執行一次
-  workflow_dispatch: # 支援手動點擊立刻執行
+    - cron: '0 8 * * *' # 每天早上 8 點自動執行
+  workflow_dispatch: # 支援手動點擊觸發
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 賦予自動寫入與 Commit 的權限
+      contents: write # 賦予自動寫入與 Commit 權限
     steps:
       - name: 取得專案程式碼
         uses: actions/checkout@v4
@@ -21,16 +21,21 @@ jobs:
 
       - name: 安裝相依套件與 Playwright
         run: |
-          pip install requests playwright
+          pip install requests playwright pandas streamlit
           playwright install chromium
 
-      - name: 執行爬蟲腳本生成/更新資料庫
+      - name: 執行爬蟲腳本更新資料庫
         run: python flight_radar_smart.py
 
-      - name: 自動將最新資料庫 Commit 回專案
+      - name: 自動將最新資料庫 Commit 並 Push 回專案 (含抗衝突機制)
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
           git add flight_smart_monitor.db
-          git commit -m "chore: auto-update flight database [skip ci]" || exit 0
-          git push
+          git diff --staged --quiet || git commit -m "chore: auto-update flight database [skip ci]"
+          
+          # 關鍵：先拉取遠端最新變更並進行變基合併，徹底解決 rejected 錯誤
+          git pull origin main --rebase || echo "No rebase needed"
+          
+          git push origin main
