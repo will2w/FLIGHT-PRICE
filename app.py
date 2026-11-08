@@ -13,28 +13,59 @@ st.set_page_config(
 DB_FILE = "flight_smart_monitor.db"
 
 
+def run_scraper_with_live_logs():
+  """執行爬蟲並將標準輸出（Stdout）即時串流到 Streamlit 的文字框中"""
+  log_output = "🚀 開始執行爬蟲與矩陣掃描...\n"
+  log_box = st.empty()  # 建立一個動態容器來刷新文字框
+  log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
+
+  try:
+    # 使用 Popen 即時捕捉執行過程中的每一行輸出
+    process = subprocess.Popen(
+        [sys.executable, "flight_radar_smart.py"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    # 逐行讀取輸出並即時更新畫面的 text_area
+    for line in iter(process.stdout.readline, ""):
+      if line:
+        log_output += line
+        log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
+
+    process.stdout.close()
+    process.wait()
+
+    if process.returncode == 0:
+      log_output += "\n✅ 爬蟲執行完畢，資料庫已更新！"
+      log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
+      return True
+    else:
+      log_output += f"\n❌ 爬蟲執行結束，返回碼: {process.returncode}"
+      log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
+      return False
+
+  except Exception as e:
+    log_output += f"\n❌ 發生例外錯誤: {str(e)}"
+    log_box.text_area("執行日誌 (Live Logs)", value=log_output, height=250)
+    return False
+
+
 def ensure_db_exists():
-  """🛡️ 自動防護：使用當前 streamlit 的 python 直譯器執行爬蟲，確保 playwright 正常載入"""
+  """🛡️ 自動防護：若無資料庫，自動執行即時日誌爬蟲生成"""
   if not os.path.exists(DB_FILE) or os.path.getsize(DB_FILE) == 0:
     st.warning(
-        "⚠️ 尚未偵測到有效的資料庫檔案。系統正在背景自動執行第一次爬蟲生成數據，請稍候約"
-        " 30-60 秒..."
+        "⚠️ 尚未偵測到有效的資料庫檔案。系統正在背景自動執行第一次爬蟲，請觀看下方即時日誌..."
     )
-    try:
-      # 關鍵：使用 sys.executable 代替 "python"，確保直譯器與套件路徑 100% 吻合
-      result = subprocess.run(
-          [sys.executable, "flight_radar_smart.py"],
-          capture_output=True,
-          text=True,
-          check=True,
-      )
+    success = run_scraper_with_live_logs()
+    if success:
       st.success("✅ 初始資料庫生成成功！正在載入儀表板...")
       st.rerun()
-    except subprocess.CalledProcessError as e:
-      st.error(f"❌ 自動生成資料庫失敗: {e.stderr}")
 
 
-# 啟動時優先檢查資料庫狀態
+# 啟動時檢查
 ensure_db_exists()
 
 
@@ -66,22 +97,15 @@ def load_matrix_status():
     return pd.DataFrame()
 
 
-# 側邊欄：手機 App 風格控制台
+# 側邊欄控制台
 st.sidebar.header("📱 雲端行動控制台")
 if st.sidebar.button("🔄 立即手動抓取最新機票"):
-  with st.spinner("正在背景執行矩陣掃描，請稍候..."):
-    try:
-      result = subprocess.run(
-          [sys.executable, "flight_radar_smart.py"],
-          capture_output=True,
-          text=True,
-          check=True,
-      )
-      st.sidebar.success("✅ 抓取成功！資料已更新。")
+  with st.spinner("正在執行即時矩陣掃描..."):
+    success = run_scraper_with_live_logs()
+    if success:
+      st.sidebar.success("✅ 抓取成功！")
       st.cache_data.clear()
       st.rerun()
-    except subprocess.CalledProcessError as e:
-      st.sidebar.error(f"❌ 抓取失敗: {e.stderr}")
 
 st.title("✈️ 德國 ➔ 中國/香港 智慧機票矩陣儀表板")
 st.markdown("追蹤多出發樞紐與目的地的即時價格、矩陣最低點與歷史走勢波動。")
@@ -92,7 +116,7 @@ df_status = load_matrix_status()
 if df_status.empty:
   st.warning(
       "⚠️ 目前資料庫仍無數據。請點擊左側側邊欄的 **「🔄 立即手動抓取最新機票」**"
-      " 按鈕來手動觸發生成！"
+      " 按鈕來觸發即時掃描！"
   )
 else:
   st.sidebar.markdown("---")
