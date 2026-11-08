@@ -88,7 +88,7 @@ def log_price_to_db(origin, destination, flight_date, price):
 def update_matrix_status(origin, destination, flight_date, current_price):
   """更新矩陣最低價狀態"""
   conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()  # 修正此處的語法錯誤
+  cursor = conn.cursor()
   route_key = f"{origin}-{destination}-{flight_date}"
   now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -155,11 +155,10 @@ def get_booking_flight_price(origin, destination, date_str):
     try:
       print(f"正在查詢 Booking.com: {origin} ➔ {destination} ({date_str})...")
       page.goto(url, timeout=40000)
-      page.wait_for_timeout(10000)  # 給予足夠時間讓 Booking 渲染動態價格
+      page.wait_for_timeout(10000)
 
       body_text = page.inner_text("body")
 
-      # 尋找價格（支援 € 或 EUR 格式）
       matches = re.findall(
           r"(?:€|EUR)\s*([\d.,]+)|([\d.,]+)\s*(?:€|EUR)", body_text
       )
@@ -197,8 +196,9 @@ def scan_single_route(args):
 
 if __name__ == "__main__":
   init_db()
+  # 修正此處的變數名稱為 destination
   tasks = [
-      (origin, dest, TARGET_DATE)
+      (origin, destination, TARGET_DATE)
       for origin in ORIGIN_HUBS
       for destination in DESTINATION_HUBS
   ]
