@@ -13,9 +13,9 @@ ORIGIN_HUBS = ["DUS", "CGN", "FRA", "AMS"]
 # 2. 目的地清單（香港與中國主要樞紐）
 DESTINATION_HUBS = ["HKG", "CAN", "SZX", "PVG", "PEK"]
 
-# 3. 預算上限 (歐元或對應幣別數值)
+# 3. 預算上限與目標出發日期
 GLOBAL_TARGET_PRICE = 800
-TARGET_DATE = "2026-12-15"  # 預計出發日期
+TARGET_DATE = "2026-12-15"
 # ========================================================
 
 
@@ -24,6 +24,7 @@ def init_db():
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
 
+  # 1. 矩陣狀態表（記錄歷史最低價與更新時間）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS flight_matrix_history (
             route_key TEXT PRIMARY KEY,
@@ -36,6 +37,7 @@ def init_db():
         )
     """)
 
+  # 2. 歷史日誌表（專門用來給 Streamlit 繪製折線圖）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS price_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +55,7 @@ def init_db():
 
 
 def log_price_to_db(origin, destination, flight_date, price):
-  """每次爬蟲檢查時，強制寫入一筆歷史價格日誌"""
+  """每次爬蟲檢查時，無條件寫入一筆歷史價格日誌"""
   if price is None:
     return
 
@@ -72,11 +74,11 @@ def log_price_to_db(origin, destination, flight_date, price):
 
   conn.commit()
   conn.close()
-  print(f" 📝 [日誌] 已記錄: {origin} ➔ {destination} = {price}")
+  print(f" 📝 [日誌] 已記錄: {origin} ➔ {destination} = {price} €")
 
 
 def update_matrix_status(origin, destination, flight_date, current_price):
-  """更新矩陣最低價狀態"""
+  """更新矩陣最低價狀態表"""
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
   route_key = f"{origin}-{destination}-{flight_date}"
@@ -120,10 +122,16 @@ def update_matrix_status(origin, destination, flight_date, current_price):
 
 
 def get_google_flight_price(origin, destination, date):
-  """利用 Playwright 掃描 Google Flights 矩陣價格"""
+  """利用 Playwright 掃描 Google Flights 矩陣價格（含雲端 Linux 相容參數）"""
   with sync_playwright() as p:
     browser = p.chromium.launch(
-        headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"]
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+        ],
     )
     context = browser.new_context(
         user_agent=(
