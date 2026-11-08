@@ -2,33 +2,6 @@ from datetime import datetime
 import os
 import re
 import sqlite3
-import subprocess
-import sys
-
-
-# 🛡️ 終極防護：確保 Playwright 瀏覽器核心在雲端 100% 存在
-def ensure_playwright_browser():
-  try:
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as p:
-      pass
-  except Exception:
-    print(
-        "⚠️ 偵測到雲端環境尚未安裝 Playwright 瀏覽器核心，正在自動執行"
-        " 'playwright install chromium'..."
-    )
-    try:
-      subprocess.check_call(
-          [sys.executable, "-m", "playwright", "install", "chromium"]
-      )
-    except Exception as e:
-      print(f"瀏覽器安裝失敗: {e}")
-
-
-# 每次執行時先確保持有瀏覽器核心
-ensure_playwright_browser()
-
 from playwright.sync_api import sync_playwright
 
 DB_FILE = "flight_smart_monitor.db"
