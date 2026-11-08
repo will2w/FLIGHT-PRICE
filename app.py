@@ -12,26 +12,59 @@ st.set_page_config(
 DB_FILE = "flight_smart_monitor.db"
 
 
+def ensure_db_exists():
+  """🛡️ 自動防護：如果雲端環境找不到資料庫或檔案為空，自動執行爬蟲生成第一批數據"""
+  if not os.path.exists(DB_FILE) or os.path.getsize(DB_FILE) == 0:
+    st.warning(
+        "⚠️ 尚未偵測到有效的資料庫檔案。系統正在背景自動執行第一次爬蟲生成數據，請稍候約"
+        " 30-60 秒..."
+    )
+    try:
+      # 自動調用爬蟲腳本生成資料庫
+      result = subprocess.run(
+          ["python", "flight_radar_smart.py"],
+          capture_output=True,
+          text=True,
+          check=True,
+      )
+      st.success("✅ 初始資料庫生成成功！正在載入儀表板...")
+      st.rerun()
+    except subprocess.CalledProcessError as e:
+      st.error(
+          f"❌ 自動生成資料庫失敗: {e.stderr}。請檢查側邊欄按鈕手動重試或檢視雲端日誌。"
+      )
+
+
+# 啟動時優先檢查資料庫狀態
+ensure_db_exists()
+
+
 @st.cache_data(ttl=10)
 def load_price_logs():
-  if not os.path.exists(DB_FILE):
+  if not os.path.exists(DB_FILE) or os.path.getsize(DB_FILE) == 0:
     return pd.DataFrame()
-  conn = sqlite3.connect(DB_FILE)
-  df = pd.read_sql_query(
-      "SELECT * FROM price_logs ORDER BY recorded_at ASC", conn
-  )
-  conn.close()
-  return df
+  try:
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query(
+        "SELECT * FROM price_logs ORDER BY recorded_at ASC", conn
+    )
+    conn.close()
+    return df
+  except Exception:
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=10)
 def load_matrix_status():
-  if not os.path.exists(DB_FILE):
+  if not os.path.exists(DB_FILE) or os.path.getsize(DB_FILE) == 0:
     return pd.DataFrame()
-  conn = sqlite3.connect(DB_FILE)
-  df = pd.read_sql_query("SELECT * FROM flight_matrix_history", conn)
-  conn.close()
-  return df
+  try:
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM flight_matrix_history", conn)
+    conn.close()
+    return df
+  except Exception:
+    return pd.DataFrame()
 
 
 # 側邊欄：手機 App 風格控制台
@@ -59,8 +92,8 @@ df_status = load_matrix_status()
 
 if df_status.empty:
   st.warning(
-      "⚠️ 尚未偵測到資料庫檔案。請點擊左側側邊欄的 **「🔄 立即手動抓取最新機票」**"
-      " 按鈕來生成第一批數據！"
+      "⚠️ 目前資料庫仍無數據。請點擊左側側邊欄的 **「🔄 立即手動抓取最新機票」**"
+      " 按鈕來手動觸發生成！"
   )
 else:
   st.sidebar.markdown("---")
@@ -84,7 +117,7 @@ else:
       min_row = filtered_status.loc[filtered_status["lowest_price"].idxmin()]
       st.metric(
           label="目前矩陣全場最低價",
-          value=f"{min_row['lowest_price']}",
+          value=f"{min_row['lowest_price']} €",
           delta=f"{min_row['origin']} ➔ {min_row['destination']}",
       )
   with col3:
