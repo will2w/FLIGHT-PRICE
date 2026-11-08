@@ -4,7 +4,6 @@ import re
 import sqlite3
 from playwright.sync_api import sync_playwright
 
-# 檔案路徑設定
 DB_FILE = "flight_smart_monitor.db"
 
 # ==================== 🧠 聰明矩陣設定區 ====================
@@ -25,7 +24,6 @@ def init_db():
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
 
-  # 1. 矩陣狀態表（記錄歷史最低價與上次通知價）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS flight_matrix_history (
             route_key TEXT PRIMARY KEY,
@@ -38,7 +36,6 @@ def init_db():
         )
     """)
 
-  # 2. 歷史日誌表（專門用來給 Streamlit 畫折線圖）
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS price_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,7 +59,6 @@ def log_price_to_db(origin, destination, flight_date, price):
 
   conn = sqlite3.connect(DB_FILE)
   cursor = conn.cursor()
-
   route_key = f"{origin}-{destination}-{flight_date}"
   recorded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -185,9 +181,7 @@ if __name__ == "__main__":
       )
 
       if current_price:
-        # 無條件寫入歷史日誌表（供折線圖使用）
         log_price_to_db(origin, destination, TARGET_DATE, current_price)
-        # 更新矩陣狀態表
         update_matrix_status(origin, destination, TARGET_DATE, current_price)
       else:
         print(f" ⚠️ 無法取得 {origin} ➔ {destination} 價格。")
