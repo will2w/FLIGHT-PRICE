@@ -88,7 +88,7 @@ def log_price_to_db(origin, destination, flight_date, price):
 def update_matrix_status(origin, destination, flight_date, current_price):
   """更新矩陣最低價狀態"""
   conn = sqlite3.connect(DB_FILE)
-.cursor()
+  cursor = conn.cursor()  # 修正此處的語法錯誤
   route_key = f"{origin}-{destination}-{flight_date}"
   now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -170,7 +170,6 @@ def get_booking_flight_price(origin, destination, date_str):
           clean_num = num_str.replace(".", "").replace(",", "")
           try:
             val = int(clean_num)
-            # 設定合理的國際機票價格區間防呆過濾
             if 150 <= val <= 8000:
               prices.append(val)
           except:
@@ -201,13 +200,12 @@ if __name__ == "__main__":
   tasks = [
       (origin, dest, TARGET_DATE)
       for origin in ORIGIN_HUBS
-      for dest in DESTINATION_HUBS
+      for destination in DESTINATION_HUBS
   ]
   print(
       f"🚀 開始執行 Booking 多執行緒矩陣掃描：總計 {len(tasks)} 條航線同步發動中..."
   )
 
-  # 使用最多 2 個執行緒平行抓取（避免對 Booking 發送過多並行請求觸發限流）
   with ThreadPoolExecutor(max_workers=2) as executor:
     futures = [executor.submit(scan_single_route, task) for task in tasks]
     for future in as_completed(futures):
