@@ -2,6 +2,7 @@ from datetime import datetime
 import os
 import sqlite3
 import subprocess
+import sys
 import pandas as pd
 import streamlit as st
 
@@ -13,16 +14,16 @@ DB_FILE = "flight_smart_monitor.db"
 
 
 def ensure_db_exists():
-  """🛡️ 自動防護：如果雲端環境找不到資料庫或檔案為空，自動執行爬蟲生成第一批數據"""
+  """🛡️ 自動防護：使用當前 streamlit 的 python 直譯器執行爬蟲，確保 playwright 正常載入"""
   if not os.path.exists(DB_FILE) or os.path.getsize(DB_FILE) == 0:
     st.warning(
         "⚠️ 尚未偵測到有效的資料庫檔案。系統正在背景自動執行第一次爬蟲生成數據，請稍候約"
         " 30-60 秒..."
     )
     try:
-      # 自動調用爬蟲腳本生成資料庫
+      # 關鍵：使用 sys.executable 代替 "python"，確保直譯器與套件路徑 100% 吻合
       result = subprocess.run(
-          ["python", "flight_radar_smart.py"],
+          [sys.executable, "flight_radar_smart.py"],
           capture_output=True,
           text=True,
           check=True,
@@ -30,9 +31,7 @@ def ensure_db_exists():
       st.success("✅ 初始資料庫生成成功！正在載入儀表板...")
       st.rerun()
     except subprocess.CalledProcessError as e:
-      st.error(
-          f"❌ 自動生成資料庫失敗: {e.stderr}。請檢查側邊欄按鈕手動重試或檢視雲端日誌。"
-      )
+      st.error(f"❌ 自動生成資料庫失敗: {e.stderr}")
 
 
 # 啟動時優先檢查資料庫狀態
@@ -73,7 +72,7 @@ if st.sidebar.button("🔄 立即手動抓取最新機票"):
   with st.spinner("正在背景執行矩陣掃描，請稍候..."):
     try:
       result = subprocess.run(
-          ["python", "flight_radar_smart.py"],
+          [sys.executable, "flight_radar_smart.py"],
           capture_output=True,
           text=True,
           check=True,
