@@ -5,25 +5,22 @@ import sqlite3
 import subprocess
 import sys
 
-# 🛡️ 關鍵修復：強制統一 Playwright 瀏覽器快取路徑至當前使用者家目錄，徹底解決雲端權限與路徑衝突
+# 🛡️ 強制將 Playwright 路徑指向統一且可寫入的家目錄，徹底解決雲端權限衝突
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.expanduser(
     "~/.cache/ms-playwright"
 )
 
-# 🛡️ 自動防護：若雲端環境缺少 Chromium 核心，自動在背景執行安裝
+# 🛡️ 強制在每次啟動時自動確保 Playwright Chromium 瀏覽器核心就緒
+print("🔄 正在檢查並確保 Playwright Chromium 瀏覽器核心已就緒...")
 try:
-  from playwright.sync_api import sync_playwright
-
-  with sync_playwright() as p:
-    pass
-except Exception:
-  print("⚠️ 偵測到雲端環境缺少 Playwright 瀏覽器核心，正在自動安裝...")
-  try:
-    subprocess.check_call(
-        [sys.executable, "-m", "playwright", "install", "chromium"]
-    )
-  except Exception as e:
-    print(f"瀏覽器自動安裝失敗: {e}")
+  subprocess.run(
+      [sys.executable, "-m", "playwright", "install", "chromium"],
+      check=True,
+      capture_output=True,
+  )
+  print("✅ Playwright 瀏覽器核心檢查/安裝完成！")
+except Exception as e:
+  print(f"⚠️ 安裝提示或略過: {e}")
 
 from playwright.sync_api import sync_playwright
 
